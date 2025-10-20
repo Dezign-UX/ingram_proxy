@@ -1,10 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import requests, re
+import requests, re, time
 
 app = FastAPI(title="Ingram Brochure Proxy")
 
-# Allow calls from Excel Online or anywhere
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,24 +15,23 @@ app.add_middleware(
 @app.get("/ingram")
 def get_brochure(sku: str):
     """
-    Given a SKU, fetch the Ingram Micro NZ search page and extract brochure PDF links.
+    Given a SKU, fetch the Ingram Micro brochure URL if available.
     Example: /ingram?sku=9X481UT
     """
-    url = f"https://nz.ingrammicro.com/Site/Search#keywords%3A{sku}"
-    try:
-        r = requests.get(url, timeout=10)
-        html = r.text
+    url = f"https://nz.ingrammicro.com/Site/Search#keywords:{sku}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
 
-        # Find any Manufacturer-Brochure PDF URLs
-        pdfs = re.findall(
-            r"https:\/\/inquirecontent2\.ingrammicro\.com\/Manufacturer-Brochure\/[0-9A-Za-z_-]+\.pdf",
-            html
-        )
-
-        if pdfs:
+    for attempt in range(2):
+        try:
+            r = requests.get(url, headers=headers, timeout=30)
+            html = r.text
+            pdfs = re.findall(r'https://inquirecontent2\.ingrammicro\.com/Manufacturer-Brochure/[A-Za-z0-9\-_.]+\.pdf', html)
             return {"sku": sku, "count": len(pdfs), "brochures": pdfs}
-        else:
-            return {"sku": sku, "count": 0, "brochures": []}
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(3)
+                continue
+            return {"sku": sku, "error": str(e), "note": "Retry failed after timeout"}
 
-    except Exception as e:
-        return {"error": str(e), "sku": sku}
